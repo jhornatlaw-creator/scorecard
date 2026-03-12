@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Shared Scorecard</title>
+  <meta name="theme-color" content="#2D5016">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .share-header { text-align: center; padding: 1rem; }
+    .share-header h1 { font-size: 1.2rem; color: var(--green); margin: 0; }
+    .share-header .share-meta { font-size: 0.85rem; color: #666; margin-top: 0.25rem; }
+    .share-error { text-align: center; padding: 3rem 1rem; color: #666; }
+    .share-actions { text-align: center; padding: 1rem; }
+    .share-actions a { color: var(--green); text-decoration: none; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="share-header">
+    <h1 id="share-title">Loading scorecard...</h1>
+    <div id="share-meta" class="share-meta"></div>
+  </div>
+
+  <div class="team-tabs">
+    <button class="team-tab active" data-team="away">Away</button>
+    <button class="team-tab" data-team="home">Home</button>
+  </div>
+
+  <div id="scorecard-container">
+    <div id="scorecard-grid"></div>
+  </div>
+
+  <div class="share-actions">
+    <a href="/">Score your own game</a>
+  </div>
+
+  <script src="js/plays.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/supabase.js"></script>
+  <script>
+    (async function() {
+      const params = new URLSearchParams(location.search);
+      const slug = params.get('s');
+      if (!slug || slug.length > 32 || !/^[a-zA-Z0-9]+$/.test(slug)) {
+        document.getElementById('share-title').textContent = 'No scorecard specified';
+        return;
+      }
+
+      function esc(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      // Normalize atBats keys from strings to integers (JSON roundtrip issue)
+      function normalizeCard(card) {
+        ['away', 'home'].forEach(side => {
+          card[side]?.batters?.forEach(b => {
+            if (b.atBats) {
+              const normalized = {};
+              for (const [k, v] of Object.entries(b.atBats)) {
+                const num = parseInt(k, 10);
+                normalized[Number.isFinite(num) ? num : k] = v;
+              }
+              b.atBats = normalized;
+            }
+          });
+        });
+        return card;
+      }
+
+      try {
+        const row = await App.Supabase.loadSharedCard(slug);
+        if (!row) {
+          document.getElementById('share-title').textContent = 'Scorecard not found';
+          return;
+        }
+
+        const card = row.card_data;
+        if (!card?.away?.batters || !card?.home?.batters) {
+          document.getElementById('share-title').textContent = 'Scorecard data unavailable';
+          return;
+        }
+
+        normalizeCard(card);
+        const innings = (typeof card.innings === 'number' && card.innings > 0) ? card.innings : 9;
+        const columns = card.columns || Array.from({length: innings}, (_, i) => String(i + 1));
+
+        document.getElementById('share-title').textContent = `${card.away.abbr} @ ${card.home.abbr}`;
+        document.getElementById('share-meta').textContent = `${card.venue || ''} — ${card.date || ''}`;
+        document.title = `${card.away.abbr} @ ${card.home.abbr} Scorecard`;
+
+        // Read-only grid renderer
+        function renderGrid(teamKey) {
+          const team = card[teamKey];
+          const container = document.getElementById('scorecard-grid');
+          container.innerHTML = '';
+          if (!team) return;
+
+          const table = document.createElement('table');
+          table.className = 'scorecard-table';
+
+          const thead = document.createElement('thead');
+          const headerRow = document.createElement('tr');
+          headerRow.innerHTML = `<th class="player-col">${esc(team.abbr || '')}</th>`;
+          columns.forEach(colKey => {
+            const inn = parseInt(colKey, 10);
+            const isCont = colKey.includes('_');
+            headerRow.innerHTML += `<th class="inning-col${isCont ? ' cont-col' : ''}">${inn}</th>`;
+          });
+          headerRow.innerHTML += '<th class="stat-col">R</th><th class="stat-col">H</th>';
+          thead.appendChild(headerRow);
+          table.appendChild(thead);
+
+          const tbody = document.createElement('tbody');
+          (team.batters || []).forEach(batter => {
+            const row = document.createElement('tr');
+            const nameCell = document.createElement('td');
+            nameCell.className = 'player-cell';
+            nameCell.innerHTML = `<span class="player-order">${esc(String(batter.order || ''))}</span><span class="player-name">${esc(batter.name || '\u2014')}</span><span class="player-pos">${esc(batter.position || '')}</span>`;
+            row.appendChild(nameCell);
+
+            columns.forEach(colKey => {
+              const cell = document.createElement('td');
+              cell.className = 'ab-cell';
+              if (colKey.includes('_')) cell.classList.add('cont-col');
+              const ab = batter.atBats?.[colKey];
+              if (ab) {
+                const play = App.PLAYS[ab.play];
+                if (play) {
+                  const color = App.PLAY_COLORS[play.cat] || '#333';
+                  let text = play.label;
+                  if (ab.fielding) text += ` ${esc(ab.fielding)}`;
+                  cell.innerHTML = `<span class="ab-result" style="color:${color}">${text}</span>`;
+                  if (ab.scored) cell.classList.add('scored');
+                }
+              }
+              row.appendChild(cell);
+            });
+
+            const atBatValues = batter.atBats ? Object.values(batter.atBats) : [];
+            const runs = atBatValues.filter(a => a.scored).length;
+            const hits = atBatValues.filter(a => App.PLAYS[a.play]?.cat === 'hit').length;
+            const rCell = document.createElement('td');
+            rCell.className = 'stat-cell';
+            rCell.textContent = runs || '';
+            row.appendChild(rCell);
+            const hCell = document.createElement('td');
+            hCell.className = 'stat-cell';
+            hCell.textContent = hits || '';
+            row.appendChild(hCell);
+            tbody.appendChild(row);
+          });
+          table.appendChild(tbody);
+          container.appendChild(table);
+        }
+
+        renderGrid('away');
+
+        document.querySelectorAll('.team-tab').forEach(tab => {
+          tab.addEventListener('click', () => {
+            document.querySelectorAll('.team-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            renderGrid(tab.dataset.team);
+          });
+        });
+      } catch (e) {
+        document.getElementById('share-title').textContent = 'Failed to load scorecard';
+      }
+    })();
+  </script>
+</body>
+</html>

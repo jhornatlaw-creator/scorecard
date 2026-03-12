@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Scorecard</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#2D5016">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ===== GAME PICKER ===== -->
+  <div id="view-games" class="view active">
+    <header>
+      <h1>SCORECARD</h1>
+      <p id="today-date"></p>
+    </header>
+
+    <!-- Auth bar -->
+    <div id="auth-bar" class="auth-bar">
+      <div id="auth-logged-out">
+        <button id="btn-show-auth" class="auth-link">Sign in to sync across devices</button>
+      </div>
+      <div id="auth-logged-in" style="display:none">
+        <span id="auth-user-name"></span>
+        <button id="btn-sync" class="auth-link">Sync</button>
+        <button id="btn-signout" class="auth-link">Sign out</button>
+      </div>
+    </div>
+
+    <div id="games-list"></div>
+    <button id="btn-manual">+ Manual Entry</button>
+    <div class="nav-row">
+      <button id="btn-history">Saved Cards</button>
+    </div>
+  </div>
+
+  <!-- ===== AUTH MODAL ===== -->
+  <div id="auth-modal" class="modal" style="display:none">
+    <div class="modal-content">
+      <div class="sheet-handle"></div>
+      <h3 id="auth-modal-title">Sign In</h3>
+      <input id="auth-email" type="email" placeholder="Email" autocomplete="email">
+      <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password">
+      <input id="auth-name" type="text" placeholder="Display name (optional)" style="display:none" autocomplete="name">
+      <div id="auth-error" class="auth-error"></div>
+      <button id="btn-auth-submit" class="btn-primary">Sign In</button>
+      <button id="btn-auth-toggle" class="auth-link">Need an account? Sign up</button>
+      <button id="btn-auth-close" class="auth-link">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ===== SCORECARD ===== -->
+  <div id="view-scorecard" class="view">
+    <div class="scorecard-header">
+      <button id="btn-back" aria-label="Back">&larr;</button>
+      <div style="text-align:center">
+        <div id="game-title"></div>
+        <div id="game-subtitle"></div>
+      </div>
+      <div class="header-actions">
+        <button id="btn-share" aria-label="Share">Share</button>
+        <button id="btn-print" aria-label="Print">Print</button>
+        <button id="btn-save" aria-label="Save">Save</button>
+      </div>
+    </div>
+
+    <div class="scorecard-toolbar">
+      <button id="btn-autofill" class="toolbar-btn" title="Auto-score from MLB live feed">Auto Score <span id="autofill-status">OFF</span></button>
+      <button id="btn-pitch-toggle" class="toolbar-btn" title="Show/hide pitch-by-pitch tracking">Pitches: ON</button>
+    </div>
+
+    <div class="team-tabs">
+      <button class="team-tab active" data-team="away">Away</button>
+      <button class="team-tab" data-team="home">Home</button>
+    </div>
+
+    <div id="scorecard-container">
+      <div id="scorecard-grid"></div>
+      <div id="print-container"></div>
+    </div>
+
+    <div class="add-inning-row">
+      <button id="btn-add-inning">+ Extra Inning</button>
+    </div>
+  </div>
+
+  <!-- ===== CELL EDITOR (Bottom Sheet) ===== -->
+  <div id="cell-editor" class="bottom-sheet">
+    <div class="editor-content">
+      <div class="sheet-handle"></div>
+      <div id="editor-title">Batter — Inning</div>
+
+      <!-- Diamond with drawing canvas -->
+      <div id="diamond-container">
+        <svg id="diamond-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+          <!-- Infield diamond -->
+          <path d="M100 185 L175 100 L100 15 L25 100 Z" fill="none" stroke="#c8bfa0" stroke-width="1.5"/>
+          <!-- Base markers -->
+          <rect x="93" y="178" width="14" height="14" fill="#c8bfa0" transform="rotate(45 100 185)"/>
+          <rect x="168" y="93" width="14" height="14" fill="#c8bfa0" transform="rotate(45 175 100)"/>
+          <rect x="93" y="8" width="14" height="14" fill="#c8bfa0" transform="rotate(45 100 15)"/>
+          <rect x="18" y="93" width="14" height="14" fill="#c8bfa0" transform="rotate(45 25 100)"/>
+          <!-- Labels -->
+          <text x="100" y="200" text-anchor="middle" font-size="9" fill="#999">HOME</text>
+          <text x="190" y="104" text-anchor="start" font-size="9" fill="#999">1B</text>
+          <text x="100" y="8" text-anchor="middle" font-size="9" fill="#999">2B</text>
+          <text x="4" y="104" text-anchor="start" font-size="9" fill="#999">3B</text>
+        </svg>
+        <canvas id="diamond-canvas"></canvas>
+      </div>
+
+      <!-- Play selection -->
+      <div id="play-buttons"></div>
+
+      <!-- Fielding input (shown when play needs it) -->
+      <div id="fielding-group">
+        <label>Fielding:</label>
+        <input id="fielding-input" type="text" inputmode="numeric" placeholder="e.g. 6-3" maxlength="12" autocomplete="off">
+        <span class="fielding-hint">1P 2C 3-1B 4-2B 5-3B 6SS 7LF 8CF 9RF</span>
+      </div>
+
+      <!-- Hit type modifier (line drive, ground ball, etc.) -->
+      <div id="hit-type-group" class="modifier-row" style="display:none">
+        <span class="modifier-label">Type:</span>
+        <div id="hit-type-buttons" class="modifier-btns"></div>
+      </div>
+
+      <!-- Direction / field zone -->
+      <div id="direction-group" class="modifier-row" style="display:none">
+        <span class="modifier-label">To:</span>
+        <div id="direction-buttons" class="modifier-btns"></div>
+      </div>
+
+      <!-- Out number in inning -->
+      <div id="out-number-group" class="modifier-row">
+        <span class="modifier-label">Out #:</span>
+        <div class="modifier-btns">
+          <button class="out-num-btn" data-out="1">1</button>
+          <button class="out-num-btn" data-out="2">2</button>
+          <button class="out-num-btn" data-out="3">3</button>
+        </div>
+      </div>
+
+      <!-- Pitch-by-pitch tracking -->
+      <div id="pitch-tracking">
+        <div class="pitch-header">
+          <span class="modifier-label">Pitches:</span>
+          <span id="pitch-sequence-display" class="pitch-sequence"></span>
+        </div>
+        <div id="pitch-result-buttons" class="pitch-btns"></div>
+        <button id="btn-pitch-undo" class="pitch-undo-btn">Undo Pitch</button>
+      </div>
+
+      <!-- Count + RBI + Out # -->
+      <div class="counters-row">
+        <div class="counter-group">
+          <span class="counter-label">B</span>
+          <button class="counter-btn" id="btn-ball-dn">&minus;</button>
+          <span class="counter-val" id="balls-display">0</span>
+          <button class="counter-btn" id="btn-ball-up">+</button>
+        </div>
+        <div class="counter-group">
+          <span class="counter-label">S</span>
+          <button class="counter-btn" id="btn-strike-dn">&minus;</button>
+          <span class="counter-val" id="strikes-display">0</span>
+          <button class="counter-btn" id="btn-strike-up">+</button>
+        </div>
+        <div class="counter-group">
+          <span class="counter-label">RBI</span>
+          <button class="counter-btn" id="btn-rbi-dn">&minus;</button>
+          <span class="counter-val" id="rbi-display">0</span>
+          <button class="counter-btn" id="btn-rbi-up">+</button>
+        </div>
+      </div>
+
+      <!-- Scored toggle -->
+      <button id="btn-scored">Runner Scored</button>
+
+      <!-- Drawing + actions -->
+      <div class="draw-controls">
+        <button id="btn-draw-toggle">Draw</button>
+        <button id="btn-draw-undo">Undo</button>
+      </div>
+
+      <div class="editor-actions">
+        <button id="btn-clear-play">Clear</button>
+        <button id="btn-done">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SAVED CARDS ===== -->
+  <div id="view-saved" class="view">
+    <header>
+      <button id="btn-history-back">&larr;</button>
+      <h2>Saved Scorecards</h2>
+    </header>
+    <div id="saved-list"></div>
+  </div>
+
+  <script src="js/plays.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/gameday.js"></script>
+  <script src="js/drawing.js"></script>
+  <script src="js/livefeed.js"></script>
+  <script src="js/scorecard.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
